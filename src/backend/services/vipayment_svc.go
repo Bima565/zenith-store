@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"crypto/md5"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -22,143 +23,159 @@ type VIPaymentService struct {
 
 func NewVIPaymentService(cfg *config.Config) *VIPaymentService {
 	return &VIPaymentService{
-		config: cfg,
-		httpClient: &http.Client{
-			Timeout: 15 * time.Second,
-		},
+		config:     cfg,
+		httpClient: &http.Client{Timeout: 15 * time.Second},
 	}
 }
 
-func (s *VIPaymentService) GenerateSign(parts ...string) string {
-	values := append([]string{s.config.VIPaymentAPIID, s.config.VIPaymentAPIKey}, parts...)
-	sum := md5.Sum([]byte(strings.Join(values, "")))
+func (s *VIPaymentService) GenerateSign() string {
+	sum := md5.Sum([]byte(s.config.VIPaymentAPIID + s.config.VIPaymentAPIKey))
 	return hex.EncodeToString(sum[:])
 }
 
 func (s *VIPaymentService) GetServices(ctx context.Context) ([]models.GameService, error) {
-	if s.config.VIPaymentAPIID == "" || s.config.VIPaymentAPIKey == "" {
+	if s.demoMode() {
 		return demoServices(), nil
 	}
 
-	endpoint := s.config.VIPaymentBaseURL + s.config.VIPaymentServicesPath
-	params := url.Values{}
-	params.Set("api_id", s.config.VIPaymentAPIID)
-	params.Set("sign", s.GenerateSign("services"))
-
-	var raw models.VIPaymentResponse
-	if err := s.request(ctx, http.MethodGet, endpoint, params, &raw); err != nil {
+	var response struct {
+		Result  bool                 `json:"result"`
+		Message string               `json:"message"`
+		Data    []models.GameService `json:"data"`
+	}
+	params := url.Values{"type": {"services"}}
+	if err := s.request(ctx, params, &response); err != nil {
 		return nil, err
 	}
-
-	data, err := json.Marshal(raw.Data)
-	if err != nil {
-		return nil, err
+	if !response.Result {
+		return nil, fmt.Errorf("VIPayment services: %s", response.Message)
 	}
-
-	var services []models.GameService
-	if err := json.Unmarshal(data, &services); err != nil {
-		return nil, fmt.Errorf("decode VIPayment services: %w", err)
-	}
-	return services, nil
+	return response.Data, nil
 }
 
 func (s *VIPaymentService) GetNickname(ctx context.Context, gameCode, userID, zoneID string) (*models.NicknameResponse, error) {
-	if s.config.VIPaymentAPIID == "" || s.config.VIPaymentAPIKey == "" {
-		return &models.NicknameResponse{
-			Nickname: "Demo User",
-			UserID:   userID,
-			ZoneID:   zoneID,
+	if s.demoMode() {
+		return &models.NicknameResponse{Nickname: "Demo User"}, nil
+	}
+
+	var response struct {
+		Result  bool            `json:"result"`
+		Message string          `json:"message"`
+		Data    string          `json:"data"`
+		Country *models.Country `json:"country,omitempty"`
+	}
+	params := url.Values{
+		"type":              {"get-nickname"},
+		"code":              {gameCode},
+		"target":            {userID},
+		"additional_target": {zoneID},
+	}
+	if err := s.request(ctx, params, &response); err != nil {
+		return nil, err
+	}
+	if !response.Result {
+		return nil, fmt.Errorf("VIPayment nickname: %s", response.Message)
+	}
+	return &models.NicknameResponse{Nickname: response.Data, Country: response.Country}, nil
+}
+
+func (s *VIPaymentService) CreateTransaction(ctx context.Context, order models.Order) (*models.Transaction, error) {
+	if s.demoMode() {
+		return &models.Transaction{
+			TrxID:  order.ReferenceID,
+			Data:   order.UserID,
+			Zone:   order.ZoneID,
+			Status: "waiting",
 		}, nil
 	}
 
-	params := url.Values{}
-	params.Set("api_id", s.config.VIPaymentAPIID)
-	params.Set("sign", s.GenerateSign(gameCode, userID, zoneID))
-	params.Set("game_code", gameCode)
-	params.Set("user_id", userID)
-	params.Set("zone_id", zoneID)
-
-	endpoint := s.config.VIPaymentBaseURL + s.config.VIPaymentNicknamePath
-	var result struct {
-		Data models.NicknameResponse `json:"data"`
+	var response struct {
+		Result  bool               `json:"result"`
+		Message string             `json:"message"`
+		Data    models.Transaction `json:"data"`
 	}
-	if err := s.request(ctx, http.MethodPost, endpoint, params, &result); err != nil {
+	params := url.Values{
+		"type":                 {"order"},
+		"service":              {order.ServiceCode},
+		"data_no":              {order.UserID},
+		"data_zone":            {order.ZoneID},
+		"post_additional_data": {order.AdditionalData},
+	}
+	if err := s.request(ctx, params, &response); err != nil {
 		return nil, err
 	}
-	return &result.Data, nil
+	if !response.Result {
+		return nil, fmt.Errorf("VIPayment order: %s", response.Message)
+	}
+	return &response.Data, nil
 }
 
-func (s *VIPaymentService) CreateTransaction(ctx context.Context, order models.Order) (map[string]interface{}, error) {
-	if s.config.VIPaymentAPIID == "" || s.config.VIPaymentAPIKey == "" {
-		return map[string]interface{}{
-			"status": "demo",
-			"message": "Transaction recorded in demo mode",
-		}, nil
+func (s *VIPaymentService) GetTransactionStatus(ctx context.Context, trxID string) ([]models.Transaction, error) {
+	if s.demoMode() {
+		return []models.Transaction{{TrxID: trxID, Status: "waiting"}}, nil
 	}
 
-	params := url.Values{}
-	params.Set("api_id", s.config.VIPaymentAPIID)
-	params.Set("sign", s.GenerateSign(order.ReferenceID, order.ServiceCode, order.UserID))
-	params.Set("ref_id", order.ReferenceID)
-	params.Set("service_code", order.ServiceCode)
-	params.Set("user_id", order.UserID)
-	params.Set("zone_id", order.ZoneID)
-	params.Set("quantity", fmt.Sprintf("%d", order.Quantity))
-
-	endpoint := s.config.VIPaymentBaseURL + s.config.VIPaymentTransactionPath
-	var result map[string]interface{}
-	if err := s.request(ctx, http.MethodPost, endpoint, params, &result); err != nil {
+	var response struct {
+		Result  bool                 `json:"result"`
+		Message string               `json:"message"`
+		Data    []models.Transaction `json:"data"`
+	}
+	params := url.Values{"type": {"status"}, "trxid": {trxID}}
+	if err := s.request(ctx, params, &response); err != nil {
 		return nil, err
 	}
-	return result, nil
+	if !response.Result {
+		return nil, fmt.Errorf("VIPayment status: %s", response.Message)
+	}
+	return response.Data, nil
 }
 
-func (s *VIPaymentService) request(
-	ctx context.Context,
-	method string,
-	endpoint string,
-	params url.Values,
-	target interface{},
-) error {
-	requestURL := endpoint
-	if method == http.MethodGet {
-		requestURL += "?" + params.Encode()
+func (s *VIPaymentService) ValidateWebhookSignature(signature string) bool {
+	expected := s.GenerateSign()
+	provided, err := hex.DecodeString(strings.TrimSpace(signature))
+	if err != nil || len(provided) != len(expected)/2 {
+		return false
 	}
+	expectedBytes, _ := hex.DecodeString(expected)
+	return subtle.ConstantTimeCompare(provided, expectedBytes) == 1
+}
 
-	var requestBody *strings.Reader
-	if method == http.MethodPost {
-		requestBody = strings.NewReader(params.Encode())
-	} else {
-		requestBody = strings.NewReader("")
-	}
-
-	req, err := http.NewRequestWithContext(ctx, method, requestURL, requestBody)
+func (s *VIPaymentService) request(ctx context.Context, params url.Values, target interface{}) error {
+	params.Set("key", s.config.VIPaymentAPIKey)
+	params.Set("sign", s.GenerateSign())
+	request, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		s.config.VIPaymentBaseURL+s.config.VIPaymentServicesPath,
+		strings.NewReader(params.Encode()),
+	)
 	if err != nil {
 		return err
 	}
-	if method == http.MethodPost {
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	}
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := s.httpClient.Do(req)
+	response, err := s.httpClient.Do(request)
 	if err != nil {
 		return fmt.Errorf("VIPayment request: %w", err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= http.StatusMultipleChoices {
-		return fmt.Errorf("VIPayment returned status %d", resp.StatusCode)
+	defer response.Body.Close()
+	if response.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("VIPayment returned status %d", response.StatusCode)
 	}
-	if err := json.NewDecoder(resp.Body).Decode(target); err != nil {
+	if err := json.NewDecoder(response.Body).Decode(target); err != nil {
 		return fmt.Errorf("decode VIPayment response: %w", err)
 	}
 	return nil
 }
 
+func (s *VIPaymentService) demoMode() bool {
+	return s.config.VIPaymentAPIID == "" || s.config.VIPaymentAPIKey == ""
+}
+
 func demoServices() []models.GameService {
 	return []models.GameService{
-		{Code: "MLBB-DIAMOND", Name: "Mobile Legends", Category: "Game", Description: "Diamond Mobile Legends", Price: 10000},
-		{Code: "FF-DIAMOND", Name: "Free Fire", Category: "Game", Description: "Diamond Free Fire", Price: 12000},
-		{Code: "PUBG-UC", Name: "PUBG Mobile", Category: "Game", Description: "Unknown Cash", Price: 15000},
+		{Code: "MLBB-DIAMOND", Game: "Mobile Legends", Name: "Diamond Mobile Legends", Price: models.ServicePrice{Basic: 10000}, Status: "available"},
+		{Code: "FF-DIAMOND", Game: "Free Fire", Name: "Diamond Free Fire", Price: models.ServicePrice{Basic: 12000}, Status: "available"},
+		{Code: "PUBG-UC", Game: "PUBG Mobile", Name: "Unknown Cash", Price: models.ServicePrice{Basic: 15000}, Status: "available"},
 	}
 }

@@ -39,7 +39,9 @@ func main() {
 		api.GET("/services", gameHandler.GetServices)
 		api.GET("/nickname", orderHandler.GetNickname)
 		api.POST("/checkout", orderHandler.Checkout)
+		api.GET("/orders/:trxid/status", orderHandler.GetStatus)
 	}
+	router.POST("/webhook/vipayment", orderHandler.Webhook)
 
 	log.Printf("Backend listening on http://localhost:%s", cfg.Port)
 	if err := router.Run(":" + cfg.Port); err != nil {

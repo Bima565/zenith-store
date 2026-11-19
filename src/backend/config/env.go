@@ -33,7 +33,7 @@ func Load() (*Config, error) {
 
 	baseURL := os.Getenv("VIPAYMENT_BASE_URL")
 	if baseURL == "" {
-		baseURL = "https://vipayment.id"
+		baseURL = "https://vip-reseller.co.id"
 	}
 
 	apiKey := os.Getenv("VIPAYMENT_API_KEY")
@@ -48,8 +48,8 @@ func Load() (*Config, error) {
 		VIPaymentAPIKey:          apiKey,
 		VIPaymentBaseURL:         strings.TrimRight(baseURL, "/"),
 		VIPaymentServicesPath:    envOrDefault("VIPAYMENT_SERVICES_PATH", "/api/game-feature"),
-		VIPaymentNicknamePath:    envOrDefault("VIPAYMENT_NICKNAME_PATH", "/api/game-feature/nickname"),
-		VIPaymentTransactionPath: envOrDefault("VIPAYMENT_TRANSACTION_PATH", "/api/transaction"),
+		VIPaymentNicknamePath:    envOrDefault("VIPAYMENT_NICKNAME_PATH", "/api/game-feature"),
+		VIPaymentTransactionPath: envOrDefault("VIPAYMENT_TRANSACTION_PATH", "/api/game-feature"),
 	}, nil
 }
 

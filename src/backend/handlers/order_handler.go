@@ -52,12 +52,13 @@ func (h *OrderHandler) Checkout(c *gin.Context) {
 	}
 
 	order := models.Order{
-		ReferenceID: generateReferenceID(),
-		ServiceCode: request.ServiceCode,
-		UserID:      request.UserID,
-		ZoneID:      request.ZoneID,
-		Quantity:    request.Quantity,
-		Status:      "pending",
+		ReferenceID:    generateReferenceID(),
+		ServiceCode:    request.ServiceCode,
+		UserID:         request.UserID,
+		ZoneID:         request.ZoneID,
+		AdditionalData: request.AdditionalData,
+		Quantity:       request.Quantity,
+		Status:         "pending",
 	}
 
 	transaction, err := h.vipayment.CreateTransaction(c.Request.Context(), order)
@@ -66,9 +67,8 @@ func (h *OrderHandler) Checkout(c *gin.Context) {
 		return
 	}
 
-	if status, ok := transaction["status"].(string); ok && status != "" {
-		order.Status = status
-	}
+	order.ReferenceID = transaction.TrxID
+	order.Status = transaction.Status
 	order.Note = "Checkout has been submitted"
 
 	h.mu.Lock()
@@ -76,9 +76,46 @@ func (h *OrderHandler) Checkout(c *gin.Context) {
 	h.mu.Unlock()
 
 	c.JSON(http.StatusCreated, gin.H{
-		"data":        order,
-		"provider":    transaction,
+		"data":     order,
+		"provider": transaction,
 	})
+}
+
+func (h *OrderHandler) GetStatus(c *gin.Context) {
+	trxID := c.Param("trxid")
+	if trxID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "trxid wajib diisi"})
+		return
+	}
+
+	transactions, err := h.vipayment.GetTransactionStatus(c.Request.Context(), trxID)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": transactions})
+}
+
+func (h *OrderHandler) Webhook(c *gin.Context) {
+	if !h.vipayment.ValidateWebhookSignature(c.GetHeader("X-Client-Signature")) {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "signature webhook tidak valid"})
+		return
+	}
+
+	var payload models.WebhookPayload
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "payload webhook tidak valid", "error": err.Error()})
+		return
+	}
+
+	h.mu.Lock()
+	if order, ok := h.orders[payload.Transaction.TrxID]; ok {
+		order.Status = payload.Transaction.Status
+		order.Note = payload.Transaction.Note
+		h.orders[payload.Transaction.TrxID] = order
+	}
+	h.mu.Unlock()
+	c.JSON(http.StatusOK, gin.H{"message": "webhook diterima"})
 }
 
 func generateReferenceID() string {

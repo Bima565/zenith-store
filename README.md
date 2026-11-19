@@ -57,3 +57,26 @@ Angular CLI does not come with an end-to-end testing framework by default. You c
 ## Additional Resources
 
 For more information on using the Angular CLI, including detailed command references, visit the [Angular CLI Overview and Command Reference](https://angular.dev/tools/cli) page.
+
+## Backend VIPayment
+
+The Go backend is located in `src/backend`. Copy `.env.example` to `.env`,
+fill in the VIPayment credentials, then run:
+
+```powershell
+cd src/backend
+go mod tidy
+go run .
+```
+
+The API listens on port `8080` by default:
+
+- `GET /health`
+- `GET /api/services`
+- `GET /api/nickname?game_code=...&user_id=...&zone_id=...`
+- `POST /api/checkout`
+- `GET /api/orders/:trxid/status`
+- `POST /webhook/vipayment`
+
+VIPayment requires the backend server's public IP to be whitelisted. The
+webhook signature is checked using the `X-Client-Signature` header.
