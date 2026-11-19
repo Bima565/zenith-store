@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -22,9 +23,17 @@ type VIPaymentService struct {
 }
 
 func NewVIPaymentService(cfg *config.Config) *VIPaymentService {
+	dialer := &net.Dialer{Timeout: 15 * time.Second}
 	return &VIPaymentService{
-		config:     cfg,
-		httpClient: &http.Client{Timeout: 15 * time.Second},
+		config: cfg,
+		httpClient: &http.Client{
+			Timeout: 15 * time.Second,
+			Transport: &http.Transport{
+				DialContext: func(ctx context.Context, _, address string) (net.Conn, error) {
+					return dialer.DialContext(ctx, "tcp4", address)
+				},
+			},
+		},
 	}
 }
 
