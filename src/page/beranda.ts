@@ -1,5 +1,5 @@
 import { HttpClient } from '@angular/common/http';
-import { afterNextRender, Component, inject, signal } from '@angular/core';
+import { afterNextRender, Component, computed, inject, signal } from '@angular/core';
 
 interface GameService {
   code: string;
@@ -8,6 +8,9 @@ interface GameService {
   description?: string;
   status?: string;
   icon?: string;
+  price?: {
+    basic: number;
+  };
 }
 
 interface ServicesResponse {
@@ -22,6 +25,7 @@ interface ServicesResponse {
 export class Beranda {
   private readonly http = inject(HttpClient);
   protected readonly services = signal<GameService[]>([]);
+  protected readonly popularServices = computed(() => this.services().slice(0, 8));
   protected readonly loading = signal(true);
   protected readonly error = signal('');
 
@@ -38,7 +42,7 @@ export class Beranda {
           )
           .map((service) => ({
             ...service,
-            icon: getGameIcon(service.game),
+            icon: service.icon || getGameIcon(service.game),
           }))
         this.services.set(games);
         this.loading.set(false);
@@ -52,6 +56,15 @@ export class Beranda {
         this.loading.set(false);
       },
     });
+  }
+
+  protected formatPrice(price: number): string {
+    return new Intl.NumberFormat('id-ID').format(price);
+  }
+
+  protected scrollPopular(direction: number): void {
+    const container = document.getElementById('popular-game-list');
+    container?.scrollBy({ left: direction * 420, behavior: 'smooth' });
   }
 }
 
@@ -71,5 +84,5 @@ function getGameIcon(game: string): string {
           ? 'hsr.hoyoverse.com'
           : 'google.com';
 
-  return `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
+  return `https://www.google.com/s2/favicons?domain=${domain}&sz=256`;
 }
