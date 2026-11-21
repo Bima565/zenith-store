@@ -16,10 +16,13 @@ type Config struct {
 	VIPaymentServicesPath    string
 	VIPaymentNicknamePath    string
 	VIPaymentTransactionPath string
+	SteamGridAPIKey          string
 }
 
 func Load() (*Config, error) {
-	_ = godotenv.Load()
+	if err := godotenv.Load(".env"); err != nil {
+		_ = godotenv.Load("src/backend/.env")
+	}
 
 	origins := strings.Split(os.Getenv("CORS_ORIGINS"), ",")
 	if strings.TrimSpace(os.Getenv("CORS_ORIGINS")) == "" {
@@ -41,6 +44,14 @@ func Load() (*Config, error) {
 		apiKey = os.Getenv("VIPAYMENT_SIGN")
 	}
 
+	steamGridKey := os.Getenv("STEAMGRID")
+	if steamGridKey == "" {
+		steamGridKey = os.Getenv("STEAMGRID_API_KEY")
+	}
+	if steamGridKey == "" {
+		steamGridKey = os.Getenv("STEAMGRIDDB_API_KEY")
+	}
+
 	return &Config{
 		Port:                     port,
 		CORSOrigins:              origins,
@@ -50,6 +61,7 @@ func Load() (*Config, error) {
 		VIPaymentServicesPath:    envOrDefault("VIPAYMENT_SERVICES_PATH", "/api/game-feature"),
 		VIPaymentNicknamePath:    envOrDefault("VIPAYMENT_NICKNAME_PATH", "/api/game-feature"),
 		VIPaymentTransactionPath: envOrDefault("VIPAYMENT_TRANSACTION_PATH", "/api/game-feature"),
+		SteamGridAPIKey:          strings.TrimSpace(steamGridKey),
 	}, nil
 }
 

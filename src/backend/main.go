@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"log"
+	"time"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -27,8 +29,19 @@ func main() {
 	router.Use(cors.New(corsConfig))
 
 	vipayment := services.NewVIPaymentService(cfg)
-	gameHandler := handlers.NewGameHandler(vipayment)
+	steamgrid := services.NewSteamGridService(cfg)
+	gameHandler := handlers.NewGameHandler(vipayment, steamgrid)
 	orderHandler := handlers.NewOrderHandler(vipayment)
+
+	// Pre-warm SteamGridDB icons (all games) + portrait grids (top 16 popular games).
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		if list, err := vipayment.GetServices(ctx); err == nil {
+			steamgrid.EnrichServices(ctx, list, 16)
+			log.Printf("SteamGridDB cache warmed (all icons + top 16 popular grids)")
+		}
+	}()
 
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok"})

@@ -20,7 +20,9 @@ type GameService struct {
 	Description string       `json:"description"`
 	Server      string       `json:"server"`
 	Status      string       `json:"status"`
+	Category    string       `json:"category,omitempty"`
 	Icon        string       `json:"icon"`
+	Grid        string       `json:"grid,omitempty"`
 }
 
 type NicknameResponse struct {
